@@ -2,7 +2,7 @@
 
 # Required parameters:
 # @raycast.schemaVersion 1
-# @raycast.title Spell Chat GPT
+# @raycast.title Fix English (Gemini)
 # @raycast.mode silent
 
 # Optional parameters:
@@ -12,49 +12,46 @@
 # @raycast.author oleksandr_serdiuk
 # @raycast.authorURL https://raycast.com/oleksandr_serdiuk
 
-# # Configuration
-# security add-generic-password -a "raycast" -s "ChatGPT-API-Key-Spell" -w "sk-proj-1234567890"
-API_KEY=$(security find-generic-password -a "raycast" -s "ChatGPT-API-Key-Spell" -w)
-PROMPT="Please fix my English:"
-MODEL="gpt-3.5-turbo"
+# Configuration
+# To set up your API key, run:
+# security add-generic-password -a "raycast" -s "Gemini-API-Key" -w "YOUR_API_KEY"
+# Get your API key from: https://aistudio.google.com/apikey
+API_KEY=$(security find-generic-password -a "raycast" -s "Gemini-API-Key" -w)
+SYSTEM_PROMPT="Please fix my English text without adding quotes. If I use short forms of words like env or prod, leave them unchanged. Return only the corrected text, nothing else."
+MODEL="gemini-2.5-flash"
 
-chatgpt_request() {
+gemini_request() {
   local input_text="$1"
-
-  # Escape JSON characters in the input text
-  local escaped_content
-  escaped_content=$(echo "$input_text" | jq -R '.')
 
   # Construct JSON payload using jq
   local payload
   payload=$(jq -n \
-    --arg model "$MODEL" \
-    --arg system_message "$PROMPT" \
+    --arg system_message "$SYSTEM_PROMPT" \
     --arg user_message "$input_text" \
     '{
-      model: $model,
-      messages: [
-        { role: "system", content: $system_message },
-        { role: "user", content: $user_message }
+      systemInstruction: {
+        parts: [{ text: $system_message }]
+      },
+      contents: [
+        {
+          parts: [{ text: $user_message }]
+        }
       ]
     }')
 
-  # Query ChatGPT API
+  # Query Gemini API
   local response
-  response=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
+  response=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $API_KEY" \
+    -H "x-goog-api-key: $API_KEY" \
     -d "$payload")
 
   # Extract the response content
-  echo "$response" | jq -r '.choices[0].message.content'
+  echo "$response" | jq -r '.candidates[0].content.parts[0].text'
 }
-#############################################
-#############################################
-#############################################
 
-
-CURRENT_APP=$(osascript -e 'tell application "System Events" to return name of first application process whose frontmost is true')
+# Get the bundle identifier of the frontmost app (more reliable than process name)
+CURRENT_APP=$(osascript -e 'tell application "System Events" to return bundle identifier of first application process whose frontmost is true')
 
 # Get clipboard content
 CONTENT=$(pbpaste)
@@ -65,17 +62,16 @@ if [[ -z "$CONTENT" ]]; then
   exit 1
 fi
 
-FIXED_TEXT=$(chatgpt_request "$CONTENT")
+FIXED_TEXT=$(gemini_request "$CONTENT")
 
 if [[ -n "$FIXED_TEXT" && "$FIXED_TEXT" != "null" ]]; then
   # Copy the result to the clipboard
-  echo "$FIXED_TEXT" | pbcopy
-
-
+  printf '%s' "$FIXED_TEXT" | pbcopy
+  echo "Fixed and copied!"
 else
-  echo "Failed to get a valid response from ChatGPT. Response: $RESPONSE"
+  echo "Failed to get a valid response from Gemini."
 fi
+
 if [[ -n "$CURRENT_APP" ]]; then
-  echo "Restoring focus to $CURRENT_APP"
-  osascript -e "tell application \"$CURRENT_APP\" to activate"
+  osascript -e "tell application id \"$CURRENT_APP\" to activate" 2>/dev/null
 fi
